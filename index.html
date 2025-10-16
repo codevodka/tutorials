@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dynamic Post Viewer</title>
+    <title>Dynamic Post Viewer (Translated)</title>
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Load Iconify for icons -->
@@ -45,7 +45,7 @@
             <h1 class="text-3xl md:text-5xl font-extrabold text-blue-600 tracking-tight">
                 WP JSON Post Viewer
             </h1>
-            <p class="text-gray-500 mt-2">Displaying Posts with Lazy Loading and Search</p>
+            <p class="text-gray-500 mt-2">Displaying Posts with Lazy Loading, Search, and Translation</p>
         </header>
 
         <!-- Search Input -->
@@ -65,6 +65,15 @@
             <!-- Cards will be injected here -->
         </div>
 
+        <!-- Notification Message Area -->
+        <div id="notificationMessage" class="text-center p-4 mt-4 bg-blue-100 border border-blue-400 text-blue-700 rounded-lg hidden">
+            <p id="translationNotice">Translating content from Persian to English using the LibreTranslate public API. Please allow a few seconds for data processing.</p>
+        </div>
+        <div id="errorBanner" class="text-center p-4 mt-4 bg-red-100 border border-red-400 text-red-700 rounded-lg hidden">
+            <p>⚠️ **Translation Failed:** Could not connect to the free translation service. Displaying content in its original language.</p>
+        </div>
+
+
         <!-- Loading Indicator / End of Content -->
         <div id="statusMessage" class="text-center p-6 mt-8">
             <div id="loader" class="flex justify-center items-center h-16 hidden">
@@ -77,33 +86,87 @@
     </div>
 
     <script>
-        const API_URL = 'https://downlodly.ir/wp-json/wp/v2/posts?categories=34&per_page=9&_embed=wp:featuredmedia,author,wp:term&orderby=date&order=desc';
+        // API Configuration
+        const API_URL = 'https://downlodly.ir/wp-json/wp/v2/posts?categories=34&per_page=18&_embed=wp:featuredmedia,author,wp:term&orderby=date&order=desc';
+        // LibreTranslate Public API Endpoint
+        const TRANSLATE_API_URL = 'https://libretranslate.com/translate'; 
+
+        // DOM Elements
         const postsContainer = document.getElementById('postsContainer');
         const loader = document.getElementById('loader');
         const endMessage = document.getElementById('endMessage');
         const searchInput = document.getElementById('searchInput');
-
+        const notificationMessage = document.getElementById('notificationMessage');
+        const errorBanner = document.getElementById('errorBanner');
+        
+        // State
         let currentPage = 1;
         let isLoading = false;
         let totalPages = 1;
         let currentSearchTerm = '';
         let debounceTimer;
+        // Global switch to bypass translation if the service fails
+        let translationActive = true; 
 
-        // Utility to safely strip HTML and decode entities (as titles seem to contain HTML entities)
+        // Utility to safely strip HTML and decode entities
         function cleanHtml(rawText) {
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = rawText;
-            // Get text content and trim whitespace. Use 'textContent' for safety.
             return tempDiv.textContent || tempDiv.innerText || '';
+        }
+        
+        // Function to translate text using the LibreTranslate API
+        async function translateText(text) {
+            if (!translationActive || !text || text.trim() === '') return text;
+
+            const payload = {
+                q: text,
+                source: 'auto',
+                target: 'en',
+                format: 'text'
+            };
+
+            for (let i = 0; i < 3; i++) {
+                try {
+                    const response = await fetch(TRANSLATE_API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        // Rate-limiting or service error encountered
+                        if (i === 2) {
+                             throw new Error(`Translation failed after ${i + 1} retries.`);
+                        }
+                        await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000 + Math.random() * 500));
+                        continue; 
+                    }
+
+                    const result = await response.json();
+                    const translatedText = result.translatedText;
+                    return translatedText ? translatedText.trim() : text;
+                } catch (error) {
+                    console.error(`Translation attempt ${i + 1} failed:`, error);
+                    if (i === 2) {
+                        // All retries failed, deactivate translation globally
+                        translationActive = false;
+                        errorBanner.classList.remove('hidden');
+                        notificationMessage.classList.add('hidden');
+                        return text;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000 + Math.random() * 500));
+                }
+            }
+            return text; 
         }
 
         // Function to create a single post card element
         function createPostCard(post) {
-            // Safely get the title
-            const title = cleanHtml(post.title.rendered);
-            // Safely get the excerpt, fallback to a placeholder
-            const excerpt = cleanHtml(post.excerpt.rendered) || 'No description available.';
-            // Get the featured media URL if available, otherwise use a placeholder
+            // Check if translation failed or was skipped, if so, use original data.
+            const title = post.translatedTitle || cleanHtml(post.title.rendered);
+            const excerpt = post.translatedExcerpt || cleanHtml(post.excerpt.rendered) || 'No description available.';
+            
             const media = post._embedded['wp:featuredmedia'];
             const imageUrl = media && media[0]?.source_url 
                 ? media[0].source_url 
@@ -118,14 +181,14 @@
 
             const card = document.createElement('div');
             card.className = 'bg-white rounded-xl shadow-lg overflow-hidden transform hover:scale-[1.02] transition duration-300 ease-in-out cursor-pointer h-full flex flex-col';
-            card.onclick = () => window.open(post.link, '_blank'); // Open link on card click
+            card.onclick = () => window.open(post.link, '_blank'); 
 
             card.innerHTML = `
                 <div class="h-48 overflow-hidden">
                     <img 
                         src="${imageUrl}" 
                         alt="${title}" 
-                        class="w-full h-full object-cover transition duration-300 filter"
+                        class="w-full h-full object-cover transition duration-300" 
                         onerror="this.onerror=null; this.src='https://placehold.co/600x400/4a5568/ffffff?text=Failed+to+Load';"
                     >
                 </div>
@@ -153,11 +216,19 @@
             isLoading = true;
             loader.classList.remove('hidden');
             endMessage.classList.add('hidden');
+            
+            if (translationActive) {
+                notificationMessage.classList.remove('hidden'); 
+                errorBanner.classList.add('hidden');
+            } else {
+                notificationMessage.classList.add('hidden'); 
+            }
 
+            // Construct the base URL with per_page=18
             let url = `${API_URL}&page=${page}`;
+            
             if (searchTerm) {
-                // For searching, we might need to reset pagination and use the search parameter 'search'
-                url = `https://downlodly.ir/wp-json/wp/v2/posts?categories=34&per_page=9&_embed=wp:featuredmedia,author,wp:term&orderby=date&order=desc&search=${searchTerm}&page=${page}`;
+                url = `https://downlodly.ir/wp-json/wp/v2/posts?categories=34&per_page=18&_embed=wp:featuredmedia,author,wp:term&orderby=date&order=desc&search=${searchTerm}&page=${page}`;
             }
 
             console.log('Fetching:', url);
@@ -165,14 +236,8 @@
             try {
                 const response = await fetch(url);
 
-                // Get total pages from header if available
                 const totalPagesHeader = response.headers.get('X-WP-TotalPages');
-                if (totalPagesHeader) {
-                    totalPages = parseInt(totalPagesHeader, 10);
-                } else {
-                    // Fallback if header is missing (e.g., in a non-grounded search scenario)
-                    totalPages = page + 1; 
-                }
+                totalPages = totalPagesHeader ? parseInt(totalPagesHeader, 10) : page + 1; 
 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
@@ -181,42 +246,66 @@
                 const data = await response.json();
                 
                 if (searchTerm) {
-                    // If performing a new search, clear the container first
                     postsContainer.innerHTML = '';
-                    // Reset current page count for search results
                     currentPage = 1; 
                 }
 
                 if (data.length === 0 && page === 1) {
                     postsContainer.innerHTML = '<p class="text-center text-xl text-red-500 col-span-full">No results found for your search.</p>';
+                    endMessage.classList.add('hidden');
                 } else if (data.length === 0) {
                      endMessage.classList.remove('hidden');
-                }
+                } else {
+                    let processedData = data;
+                    if (translationActive) {
+                        // --- Translation Logic ---
+                        const translationPromises = data.map(async post => {
+                            const titleText = cleanHtml(post.title.rendered);
+                            const excerptText = cleanHtml(post.excerpt.rendered);
 
-                data.forEach(post => {
-                    const card = createPostCard(post);
-                    postsContainer.appendChild(card);
-                });
-                
-                if (page >= totalPages && data.length > 0) {
-                     endMessage.classList.remove('hidden');
-                } else if (!searchTerm && data.length > 0) {
-                    currentPage++;
+                            const [translatedTitle, translatedExcerpt] = await Promise.all([
+                                translateText(titleText),
+                                translateText(excerptText)
+                            ]);
+
+                            return {
+                                ...post,
+                                // If translation failed/returned original, they will be identical, but we still assign them for consistency
+                                translatedTitle: translatedTitle,
+                                translatedExcerpt: translatedExcerpt
+                            };
+                        });
+                        processedData = await Promise.all(translationPromises);
+                    }
+                    
+                    // Render cards using the processed data
+                    processedData.forEach(post => {
+                        const card = createPostCard(post);
+                        postsContainer.appendChild(card);
+                    });
+                    
+                    if (page >= totalPages) {
+                        endMessage.classList.remove('hidden');
+                    } else if (!searchTerm) {
+                        currentPage++;
+                    }
                 }
 
             } catch (error) {
-                console.error('Error fetching data:', error);
-                // Display error message only if nothing has loaded yet
+                console.error('Error in fetchPosts:', error);
                 if (postsContainer.children.length === 0) {
-                    postsContainer.innerHTML = '<p class="text-center text-xl text-red-500 col-span-full">Failed to load content. Please check the network connection.</p>';
+                    postsContainer.innerHTML = '<p class="text-center text-xl text-red-500 col-span-full">Failed to load main content. Please check the network connection.</p>';
                 } else {
-                    // Show a soft message if loading more failed
                     endMessage.innerHTML = '<p class="text-red-500">Could not load more items.</p>';
                     endMessage.classList.remove('hidden');
                 }
             } finally {
                 isLoading = false;
                 loader.classList.add('hidden');
+                // Only hide notification if translation is still active (it hides itself upon failure)
+                if (translationActive) {
+                    notificationMessage.classList.add('hidden'); 
+                }
             }
         }
 
@@ -228,10 +317,9 @@
                 // Only search if the term has changed
                 if (newSearchTerm !== currentSearchTerm) {
                     currentSearchTerm = newSearchTerm;
-                    // Reset to page 1 and clear results for a new search
                     postsContainer.innerHTML = '';
                     currentPage = 1;
-                    totalPages = 1; // Reset max pages assumption
+                    totalPages = 1;
                     fetchPosts(currentPage, currentSearchTerm);
                 }
             }, 500); // 500ms delay
@@ -240,7 +328,6 @@
         // Infinite scroll observer setup
         const observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting && !isLoading && currentPage <= totalPages) {
-                // If the sentinel is visible, not loading, and there are more pages, fetch next page
                 fetchPosts(currentPage, currentSearchTerm);
             }
         }, {
@@ -256,11 +343,10 @@
         document.body.appendChild(sentinel);
         observer.observe(sentinel);
 
-        // Initial load
+        // Initial load logic
         window.onload = () => {
-            // After all elements load, we fetch the first page
             fetchPosts(currentPage, currentSearchTerm);
-            // Re-observe the sentinel as it might have been moved/recreated
+
             const currentSentinel = document.getElementById('sentinel');
             if (currentSentinel) {
                 observer.unobserve(currentSentinel);
