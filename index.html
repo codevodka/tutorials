@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Post Viewer</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Iconify for icons -->
+    <script src="https://code.iconify.design/1/1.0.7/iconify.min.js"></script>
+    <style>
+        /* Custom scrollbar styling for a cleaner look */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #9ca3af;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6b7280;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        /* Style for the loading spinner */
+        .loader {
+            border-top-color: #3b82f6;
+            -webkit-animation: spin 1s ease-in-out infinite;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @-webkit-keyframes spin {
+            to { -webkit-transform: rotate(360deg); }
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center py-6 mb-8 bg-white shadow-xl rounded-xl">
+            <h1 class="text-3xl md:text-5xl font-extrabold text-blue-600 tracking-tight">
+                WP JSON Post Viewer
+            </h1>
+            <p class="text-gray-500 mt-2">Displaying Posts with Lazy Loading and Search</p>
+        </header>
+
+        <!-- Search Input -->
+        <div class="mb-8 p-4 bg-white rounded-xl shadow-lg flex items-center space-x-3">
+            <span class="iconify text-gray-500 text-2xl" data-icon="lucide:search"></span>
+            <input 
+                type="text" 
+                id="searchInput" 
+                placeholder="Search posts by title..."
+                class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
+                oninput="debounceSearch()"
+            >
+        </div>
+        
+        <!-- Main Content Area -->
+        <div id="postsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <!-- Cards will be injected here -->
+        </div>
+
+        <!-- Loading Indicator / End of Content -->
+        <div id="statusMessage" class="text-center p-6 mt-8">
+            <div id="loader" class="flex justify-center items-center h-16 hidden">
+                <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12"></div>
+                <span class="ml-3 text-lg font-medium text-gray-600">Loading more content...</span>
+            </div>
+            <p id="endMessage" class="text-gray-500 font-medium hidden">All results loaded.</p>
+        </div>
+
+    </div>
+
+    <script>
+        const API_URL = 'https://downlodly.ir/wp-json/wp/v2/posts?categories=34&per_page=9&_embed=wp:featuredmedia,author,wp:term&orderby=date&order=desc';
+        const postsContainer = document.getElementById('postsContainer');
+        const loader = document.getElementById('loader');
+        const endMessage = document.getElementById('endMessage');
+        const searchInput = document.getElementById('searchInput');
+
+        let currentPage = 1;
+        let isLoading = false;
+        let totalPages = 1;
+        let currentSearchTerm = '';
+        let debounceTimer;
+
+        // Utility to safely strip HTML and decode entities (as titles seem to contain HTML entities)
+        function cleanHtml(rawText) {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = rawText;
+            // Get text content and trim whitespace. Use 'textContent' for safety.
+            return tempDiv.textContent || tempDiv.innerText || '';
+        }
+
+        // Function to create a single post card element
+        function createPostCard(post) {
+            // Safely get the title
+            const title = cleanHtml(post.title.rendered);
+            // Safely get the excerpt, fallback to a placeholder
+            const excerpt = cleanHtml(post.excerpt.rendered) || 'No description available.';
+            // Get the featured media URL if available, otherwise use a placeholder
+            const media = post._embedded['wp:featuredmedia'];
+            const imageUrl = media && media[0]?.source_url 
+                ? media[0].source_url 
+                : 'https://placehold.co/600x400/3b82f6/ffffff?text=Image+Not+Available';
+            
+            // Format the date
+            const date = new Date(post.date).toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-xl shadow-lg overflow-hidden transform hover:scale-[1.02] transition duration-300 ease-in-out cursor-pointer h-full flex flex-col';
+            card.onclick = () => window.open(post.link, '_blank'); // Open link on card click
+
+            card.innerHTML = `
+                <div class="h-48 overflow-hidden">
+                    <img 
+                        src="${imageUrl}" 
+                        alt="${title}" 
+                        class="w-full h-full object-cover transition duration-300 filter grayscale hover:grayscale-0"
+                        onerror="this.onerror=null; this.src='https://placehold.co/600x400/4a5568/ffffff?text=Failed+to+Load';"
+                    >
+                </div>
+                <div class="p-6 flex flex-col flex-grow">
+                    <h2 class="text-xl font-bold text-gray-800 mb-2">${title}</h2>
+                    <p class="text-sm text-blue-500 font-semibold mb-3 flex items-center">
+                        <span class="iconify mr-1" data-icon="lucide:calendar-check"></span>
+                        ${date}
+                    </p>
+                    <p class="text-gray-600 text-sm flex-grow mb-4 line-clamp-3">${excerpt}</p>
+                    
+                    <a href="${post.link}" target="_blank" class="text-blue-600 font-semibold flex items-center hover:text-blue-800 transition">
+                        Read More
+                        <span class="iconify ml-1 text-lg" data-icon="lucide:arrow-right-circle"></span>
+                    </a>
+                </div>
+            `;
+            return card;
+        }
+
+        // Fetch data function
+        async function fetchPosts(page, searchTerm = '') {
+            if (isLoading) return;
+
+            isLoading = true;
+            loader.classList.remove('hidden');
+            endMessage.classList.add('hidden');
+
+            let url = `${API_URL}&page=${page}`;
+            if (searchTerm) {
+                // For searching, we might need to reset pagination and use the search parameter 'search'
+                url = `https://downlodly.ir/wp-json/wp/v2/posts?categories=34&per_page=9&_embed=wp:featuredmedia,author,wp:term&orderby=date&order=desc&search=${searchTerm}&page=${page}`;
+            }
+
+            console.log('Fetching:', url);
+
+            try {
+                const response = await fetch(url);
+
+                // Get total pages from header if available
+                const totalPagesHeader = response.headers.get('X-WP-TotalPages');
+                if (totalPagesHeader) {
+                    totalPages = parseInt(totalPagesHeader, 10);
+                } else {
+                    // Fallback if header is missing (e.g., in a non-grounded search scenario)
+                    totalPages = page + 1; 
+                }
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                if (searchTerm) {
+                    // If performing a new search, clear the container first
+                    postsContainer.innerHTML = '';
+                    // Reset current page count for search results
+                    currentPage = 1; 
+                }
+
+                if (data.length === 0 && page === 1) {
+                    postsContainer.innerHTML = '<p class="text-center text-xl text-red-500 col-span-full">No results found for your search.</p>';
+                } else if (data.length === 0) {
+                     endMessage.classList.remove('hidden');
+                }
+
+                data.forEach(post => {
+                    const card = createPostCard(post);
+                    postsContainer.appendChild(card);
+                });
+                
+                if (page >= totalPages && data.length > 0) {
+                     endMessage.classList.remove('hidden');
+                } else if (!searchTerm && data.length > 0) {
+                    currentPage++;
+                }
+
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                // Display error message only if nothing has loaded yet
+                if (postsContainer.children.length === 0) {
+                    postsContainer.innerHTML = '<p class="text-center text-xl text-red-500 col-span-full">Failed to load content. Please check the network connection.</p>';
+                } else {
+                    // Show a soft message if loading more failed
+                    endMessage.innerHTML = '<p class="text-red-500">Could not load more items.</p>';
+                    endMessage.classList.remove('hidden');
+                }
+            } finally {
+                isLoading = false;
+                loader.classList.add('hidden');
+            }
+        }
+
+        // Debounce function for input to avoid excessive API calls while typing
+        function debounceSearch() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                const newSearchTerm = searchInput.value.trim();
+                // Only search if the term has changed
+                if (newSearchTerm !== currentSearchTerm) {
+                    currentSearchTerm = newSearchTerm;
+                    // Reset to page 1 and clear results for a new search
+                    postsContainer.innerHTML = '';
+                    currentPage = 1;
+                    totalPages = 1; // Reset max pages assumption
+                    fetchPosts(currentPage, currentSearchTerm);
+                }
+            }, 500); // 500ms delay
+        }
+
+        // Infinite scroll observer setup
+        const observer = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && !isLoading && currentPage <= totalPages) {
+                // If the sentinel is visible, not loading, and there are more pages, fetch next page
+                fetchPosts(currentPage, currentSearchTerm);
+            }
+        }, {
+            root: null, // relative to viewport
+            rootMargin: '0px 0px 200px 0px', // start loading 200px before reaching the end
+            threshold: 0.1
+        });
+
+        // Create the sentinel element for observing
+        const sentinel = document.createElement('div');
+        sentinel.id = 'sentinel';
+        sentinel.className = 'h-1 w-full mt-8';
+        document.body.appendChild(sentinel);
+        observer.observe(sentinel);
+
+        // Initial load
+        window.onload = () => {
+            // After all elements load, we fetch the first page
+            fetchPosts(currentPage, currentSearchTerm);
+            // Re-observe the sentinel as it might have been moved/recreated
+            const currentSentinel = document.getElementById('sentinel');
+            if (currentSentinel) {
+                observer.unobserve(currentSentinel);
+                observer.observe(currentSentinel);
+            }
+        };
+
+    </script>
+
+</body>
+</html>
